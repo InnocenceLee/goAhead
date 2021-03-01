@@ -61,3 +61,98 @@ Condition接口的主要实现类是AQS的内部类`ConditionObject`，**每个C
 ### 关于CountDowanLatch和CyclicBarrier
 
 超级经典：https://blog.csdn.net/qq_39241239/article/details/87030142
+
+
+
+### 关于线程
+
+线程状态：
+
+![在这里插入图片描述](https://img-blog.csdnimg.cn/20190511095933572.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3NzcHVkZGluZw==,size_16,color_FFFFFF,t_70)
+
+1. NEW 新建状态，线程创建且没有执行start方法时的状态
+2. RUNNABLE 可运行状态，线程已经启动，但是等待相应的资源（比如IO或者时间片切换）才能开始执行
+   - RUNNABLE :当一个线程对象创建后，其他线程调用它的start()方法，该线程就进入就绪状态，Java虚拟机会为它创建方法调用栈和程序计数器。处于这个状态的线程位于可运行池中，等待获得CPU的使用权。
+   - RUNNING:处于这个状态的线程占用CPU，执行程序代码。只有处于就绪状态的线程才有机会转到运行状态。
+3. BLOCKED 阻塞状态，当遇到synchronized或者lock且没有取得相应的锁，就会进入这个状态
+4. WAITING 等待状态，当调用`Object.wait`或者`Thread.join()`且没有设置时间，在或者`LockSupport.park`时，都会进入等待状态。
+5. TIMED_WAITING 计时等待，当调用`Thread.sleep()`或者`Object.wait(xx)`或者`Thread.join(xx)`或者`LockSupport.parkNanos`或者`LockSupport.partUntil`时，进入该状态
+6. TERMINATED 终止状态，线程中断或者运行结束的状态
+
+
+
+> FutureTask最主要特性：**相同的FutureTask对象，只会被执行一次，来保证任务的唯一性，且线程安全。** 
+
+FutureTask的get方法源码解析：
+
+```java
+/**
+*state值表示状态：
+	private static final int NEW          = 0;
+    private static final int COMPLETING   = 1;
+    private static final int NORMAL       = 2;
+    private static final int EXCEPTIONAL  = 3;
+    private static final int CANCELLED    = 4;
+    private static final int INTERRUPTING = 5;
+    private static final int INTERRUPTED  = 6;
+* 即当状态大于等于NORMAL时，直接返回，不会再执行任务
+*/
+public V get() throws InterruptedException, ExecutionException {
+        int s = state;
+        if (s <= COMPLETING)
+            s = awaitDone(false, 0L);
+        return report(s);
+    }
+
+	/**
+		outcome存储任务运行结果
+     */
+    @SuppressWarnings("unchecked")
+    private V report(int s) throws ExecutionException {
+        Object x = outcome;
+        if (s == NORMAL)
+            return (V)x;
+        if (s >= CANCELLED)
+            throw new CancellationException();
+        throw new ExecutionException((Throwable)x);
+    }
+
+//上述执行一次的原因在run方法执行后，会set(result)会将state改成NORMAL
+public void run() {
+        if (state != NEW ||
+            !UNSAFE.compareAndSwapObject(this, runnerOffset,
+                                         null, Thread.currentThread()))
+            return;
+        try {
+            Callable<V> c = callable;
+            if (c != null && state == NEW) {
+                V result;
+                boolean ran;
+                try {
+                    result = c.call();
+                    ran = true;
+                } catch (Throwable ex) {
+                    result = null;
+                    ran = false;
+                    setException(ex);
+                }
+                if (ran)
+                    set(result);
+            }
+        } finally {
+            runner = null;
+            int s = state;
+            if (s >= INTERRUPTING)
+                handlePossibleCancellationInterrupt(s);
+        }
+    }
+
+	protected void set(V v) {
+        if (UNSAFE.compareAndSwapInt(this, stateOffset, NEW, COMPLETING)) {
+            outcome = v;
+            UNSAFE.putOrderedInt(this, stateOffset, NORMAL); // final state
+            finishCompletion();
+        }
+    }
+```
+

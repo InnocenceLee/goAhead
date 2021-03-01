@@ -1,10 +1,11 @@
-HashMap使用链表法避免哈希冲突（相同hash值），当链表长度大于TREEIFY_THRESHOLD（默认为8）时，将链表转换为红黑树。当小于等于UNTREEIFY_THRESHOLD（默认为6）时，又会退化回链表以达到性能均衡。 下图为HashMap的数据结构（数组+链表+红黑树 ）
+java8中HashMap使用链表法避免哈希冲突（相同hash值），当链表长度大于TREEIFY_THRESHOLD（默认为8）时，将链表转换为红黑树。当小于等于UNTREEIFY_THRESHOLD（默认为6）时，又会退化回链表以达到性能均衡。 下图为HashMap的数据结构（数组+链表+红黑树 ）
 
 
 
 ![img](https:////upload-images.jianshu.io/upload_images/7368936-0424df309cb12e86.png?imageMogr2/auto-orient/strip|imageView2/2/w/552/format/webp)
 
-HashMap的数据结构
+> Hashtable和ConcurrentHashMap两者均不允许key和value为null，否则会报错空指针异常。对于Hashtable主要是设计当时想key都能实现hashCode和equals方法。并且ConcurrentHashmap和Hashtable都是支持并发的，这样会有一个问题，当你通过get(k)获取对应的value时，如果获取到的是null时，你无法判断，它是put（k,v）的时候value为null，还是这个key从来没有做过映射。HashMap是非并发的，可以通过contains(key)来做这个判断。而支持并发的Map在调用m.contains（key）和m.get(key),m可能已经不同了。
+>
 
 ## HashMap在并发时出现的问题
 
@@ -38,7 +39,7 @@ while(null != e) {
     }
     int i = indexFor(e.hash, newCapacity);
     e.next = newTable[i];
-    newTable[i] = e;
+    newTable[i] = e;  //newTable[i]可以理解成新链表的头指针
     e = next;
 }
 ```
@@ -106,6 +107,47 @@ while(null != e) {
 
 于是，当我们的线程一调用到，HashTable.get(11)时，悲剧就出现了——Infinite Loop。
 
+## JDK8的构造方法
+
+```java
+public HashMap(int initialCapacity, float loadFactor) {
+        if (initialCapacity < 0)
+            throw new IllegalArgumentException("Illegal initial capacity: " +
+                                               initialCapacity);
+        if (initialCapacity > MAXIMUM_CAPACITY)
+            initialCapacity = MAXIMUM_CAPACITY;
+        if (loadFactor <= 0 || Float.isNaN(loadFactor))
+            throw new IllegalArgumentException("Illegal load factor: " +
+                                               loadFactor);
+        this.loadFactor = loadFactor;
+        this.threshold = tableSizeFor(initialCapacity); //jdk1.8阈值为传入容量的最近2次幂
+    }
+ public HashMap(int initialCapacity) {
+        this(initialCapacity, DEFAULT_LOAD_FACTOR);
+    }
+
+    /**
+     * Constructs an empty <tt>HashMap</tt> with the default initial capacity
+     * (16) and the default load factor (0.75).
+     */
+    public HashMap() {
+        this.loadFactor = DEFAULT_LOAD_FACTOR; // all other fields defaulted
+    }
+
+```
+
+## JDK8的hash算法
+
+```java
+static final int hash(Object key) {
+        int h;
+        return (key == null) ? 0 : (h = key.hashCode()) ^ (h >>> 16);
+    }//相当简单，就是key的hashcode然后高位右移减少哈希碰撞
+
+//计算桶下标，由于n是2次幂，所以&运算代替%
+i = (n - 1) & hash
+```
+
 
 
 ## JDK8的put源码
@@ -131,7 +173,7 @@ final V putVal(int hash, K key, V value, boolean onlyIfAbsent,
                 e = ((TreeNode<K,V>)p).putTreeVal(this, tab, hash, key, value);
             else {
 			//如果p不为空，且key也不相等，此时节点p不是TreeNode类型（即是Node类型），则将新节点添加到该位置所在链表的最后的一个元素
-			//并且添加完成后，如果此时该位置的链表超过了阈值，则转化为红黑树
+			//并且添加完成后，如果此时该位置的链表超过了阈值，则转化为红黑树，需要注意treeifyBin内部判断如果元素个数小于64，则会扩容，而不是树化
                 for (int binCount = 0; ; ++binCount) {
                     if ((e = p.next) == null) {
                         p.next = newNode(hash, key, value, null);
@@ -164,6 +206,27 @@ final V putVal(int hash, K key, V value, boolean onlyIfAbsent,
         afterNodeInsertion(evict);
         return null;
     }
+//转换为红黑树方法，小于64时依然会扩容而不是树化
+final void treeifyBin(Node<K,V>[] tab, int hash) {
+        int n, index; Node<K,V> e;
+        if (tab == null || (n = tab.length) < MIN_TREEIFY_CAPACITY) //MIN_TREEIFY_CAPACITY值为64
+            resize();
+        else if ((e = tab[index = (n - 1) & hash]) != null) {
+            TreeNode<K,V> hd = null, tl = null;
+            do {
+                TreeNode<K,V> p = replacementTreeNode(e, null);
+                if (tl == null)
+                    hd = p;
+                else {
+                    p.prev = tl;
+                    tl.next = p;
+                }
+                tl = p;
+            } while ((e = e.next) != null);
+            if ((tab[index] = hd) != null)
+                hd.treeify(tab);
+        }
+    }
 ```
 
 ## JDK8的resize源码
@@ -182,10 +245,10 @@ final Node<K,V>[] resize() {
             else if ((newCap = oldCap << 1) < MAXIMUM_CAPACITY &&
                      oldCap >= DEFAULT_INITIAL_CAPACITY)
                 newThr = oldThr << 1; // 当原长度大于16时，新数组的长度和阈值都扩展为原数组的2倍
-        }
-        else if (oldThr > 0) // initial capacity was placed in threshold
+        }//oldThr大于0说明构造时传入了初始容量
+        else if (oldThr > 0) // initial capacity was placed in threshold（初始容量放于此）
             newCap = oldThr;//如果老数组为空但是阈值大于0，则将新数组长度等于阈值
-        else {               // 第一次全部初始化
+        else {               // 则第一次全部初始化
             newCap = DEFAULT_INITIAL_CAPACITY;
             newThr = (int)(DEFAULT_LOAD_FACTOR * DEFAULT_INITIAL_CAPACITY);
         }
@@ -335,13 +398,76 @@ static final int tableSizeFor(int cap) {
         n |= n >>> 16;
         return (n < 0) ? 1 : (n >= MAXIMUM_CAPACITY) ? MAXIMUM_CAPACITY : n + 1;
     }
+
+//jdk7中计算方式如下：可见与8的区别在于对于数据的处理。jdk8是减一，jdk7是...
+private static int roundUpToPowerOf2(int number) {
+        // assert number >= 0 : "number must be non-negative";
+        return number >= MAXIMUM_CAPACITY
+                ? MAXIMUM_CAPACITY
+                : (number > 1) ? Integer.highestOneBit((number - 1) << 1) : 1;
+    }
+public static int highestOneBit(int i) {
+        // HD, Figure 3-1
+        i |= (i >>  1);
+        i |= (i >>  2);
+        i |= (i >>  4);
+        i |= (i >>  8);
+        i |= (i >> 16);
+        return i - (i >>> 1);
+    }
 ```
 
-jdk8的put方法
+## jdk8的put过程图解
 
 ![img](https:////upload-images.jianshu.io/upload_images/7368936-f6436cc54ff9ba42.png?imageMogr2/auto-orient/strip|imageView2/2/w/1200/format/webp)
 
-## JDK7的put源码
+## JDK7的构造方法
+
+```java
+public HashMap(int initialCapacity, float loadFactor) {
+        if (initialCapacity < 0)
+            throw new IllegalArgumentException("Illegal initial capacity: " +
+                                               initialCapacity);
+        if (initialCapacity > MAXIMUM_CAPACITY)
+            initialCapacity = MAXIMUM_CAPACITY;
+        if (loadFactor <= 0 || Float.isNaN(loadFactor))
+            throw new IllegalArgumentException("Illegal load factor: " +
+                                               loadFactor);
+
+        this.loadFactor = loadFactor;
+        threshold = initialCapacity; //与1.8不同的是1.7中threhold初始设置为传入的值（首次put时infalteTable方法才会更新阈值），而1.8中是已经处理成了最近的2次幂。
+        init();
+    }
+
+    public HashMap(int initialCapacity) {
+        this(initialCapacity, DEFAULT_LOAD_FACTOR);
+    }
+
+    public HashMap() {
+        this(DEFAULT_INITIAL_CAPACITY, DEFAULT_LOAD_FACTOR);
+    }
+```
+
+## JDK7的hash算法
+
+```java
+final int hash(Object k) {
+        int h = hashSeed;
+        if (0 != h && k instanceof String) {
+            return sun.misc.Hashing.stringHash32((String) k);
+        }
+        h ^= k.hashCode();
+        // This function ensures that hashCodes that differ only by
+        // constant multiples at each bit position have a bounded
+        // number of collisions (approximately 8 at default load factor).
+        h ^= (h >>> 20) ^ (h >>> 12);
+        return h ^ (h >>> 7) ^ (h >>> 4);
+    }
+```
+
+
+
+## JDK7的put、resize源码
 
 ```java
 public V put(K key, V value) {
@@ -363,7 +489,7 @@ public V put(K key, V value) {
             }
         }
         modCount++;//增加修改次数，普通transient变量
-        addEntry(hash, key, value, i);//进入插入方法
+        addEntry(hash, key, value, i);//进入节点插入方法
         return null;
     }
 
@@ -408,7 +534,7 @@ public V put(K key, V value) {
                     e.hash = null == e.key ? 0 : hash(e.key);
                 }
                 int i = indexFor(e.hash, newCapacity);
-                //从这个位置可以看到新数组扩容迁移元素采用头插法，会引起原链表倒序
+                //从这个位置可以看到新数组扩容迁移元素采用头插法，**会引起原链表倒序**
                 e.next = newTable[i];
                 newTable[i] = e;
                 e = next;
@@ -436,15 +562,13 @@ public V put(K key, V value) {
 
 ![img](https:////upload-images.jianshu.io/upload_images/7368936-16e941c679177719.png?imageMogr2/auto-orient/strip|imageView2/2/w/1198/format/webp)
 
-JDK8的hash计算和索引计算
-
 ### 2.hash碰撞的插入方式的优化
 
 发生hash碰撞时，JDK7会在链表头部插入，而JDK8会在链表尾部插入。头插法是操作速度最快的，找到数组位置就直接找到插入位置了，但JDK8之前hashmap这种插入方法在并发场景下会出现死循环。JDK8开始hashmap链表在节点长度达到8之后会变成红黑树，这样一来在数组后节点长度不断增加时，遍历一次的次数就会少很多（否则每次要遍历所有），而且也可以避免之前的循环列表问题。同时如果变成红黑树，也不可能做头插法了。
 
 ### 3.扩容机制的优化
 
-在JDK7中，对所有链表进行rehash计算；在JDK8中，实际上也是通过取余找到元素所在的数组的位置，取余的方式在putVal里面：`i = (n - 1) & hash`。我们假设，在扩容之前，key取余之后留下了n位。扩容之后，容量变为2倍，所以key取余得到的就有n+1位。在这n+1位里面，如果第1位是0，那么扩容前后这个key的位置还是在相同的位置（因为hash相同，并且余数的第1位是0，和之前n位的时候一样，所以余数还是一样，位置就一样了）；如果这n+1位的第一位是1，那么就和之前的不同，那么这个key就应该放在之前的位置再加上之前整个数组的长度的位置。这样子就减少了移动所有数据带来的消耗。（慢慢读两遍，想明白了，就觉得这个其实不看图更好理解）
+在JDK7中，对所有链表进行rehash计算；在JDK8中，实际上也是通过取余找到元素所在的数组的位置，取余的方式在putVal里面：`i = (n - 1) & hash`。我们假设，在扩容之前，key取余之后留下了n位。扩容之后，容量变为2倍，所以key取余得到的二进制数就有n+1位。在这n+1位里面，如果第1位是0，那么扩容前后这个key的位置还是在相同的位置（因为hash相同，并且余数的第1位是0，和之前n位的时候一样，所以余数还是一样，位置就一样了）；如果这n+1位的第一位是1，那么就和之前的不同，那么这个key就应该放在之前的位置再加上之前整个数组的长度的位置。这样子就减少了移动所有数据带来的消耗。（慢慢读两遍，想明白了，就觉得这个其实不看图更好理解）
 
 
 
@@ -466,9 +590,9 @@ JDK8的rehash计算
 1. 就是hashmap在存值的时候（默认大小为16，负载因子0.75，阈值12），可能达到最后存满16个值的时候，再存入第17个值才会发生扩容现象，因为前16个值，每个值在底层数组中分别占据一个位置，并没有发生hash碰撞。
 2. 当然也有可能存储更多值（超多16个值，最多可以存26个值）都还没有扩容。原理：前11个值全部hash碰撞，存到数组的同一个位置（这时元素个数小于阈值12，不会扩容），后面所有存入的15个值全部分散到数组剩下的15个位置（这时元素个数大于等于阈值，但是每次存入的元素并没有发生hash碰撞，所以不会扩容），前面11+15=26，所以在存入第27个值的时候才同时满足上面两个条件，这时候才会发生扩容现象。
 
-**而在JDK8中，扩容的条件只有一个，就是当前容量大于阈值（阈值等于当前hashmap最大容量乘以负载因子）**
+**而在JDK8中，扩容的条件只有一个，就是当前容量大于阈值（阈值等于当前hashmap最大容量乘以负载因子），并且在每次插入完成后会判断是否需要扩容（jdk7是扩容后再进行插入）**
 
-### HashMap在JDK7中扩容计算新索引的方法
+### HashMap在JDK7扩容过程中计算新索引的方法
 
 转移操作 = 按旧链表的正序遍历链表、在新链表的头部依次插入，即在转移数据、扩容后，容易出现链表逆序的情况 。
 
@@ -477,7 +601,7 @@ JDK8的rehash计算
 
 > 一般认为，Java的%、/操作比&慢10倍左右，因此采用&运算而不是`h % length`会提高性能。
 
-### HashMap在JDK8中计算索引的方法
+### HashMap在JDK8扩容过程中计算索引的方法
 
 **这个设计确实非常的巧妙，既省去了重新计算hash值的时间，也就是说1.8不用重新计算hash值而且同时，由于新增的1bit是0还是1可以认为是随机的，因此resize的过程，均匀的把之前的冲突的节点分散到新的bucket了。**这一块就是JDK1.8新增的优化点。有一点注意区别，**JDK1.7中rehash的时候，旧链表迁移新链表的时候，如果在新表的数组索引位置相同，则链表元素会倒置，因为他采用的是头插法，先拿出旧链表头元素。但是从下图可以看出，JDK1.8不会倒置，采用的尾插法。**
 
