@@ -66,7 +66,7 @@ Condition接口的主要实现类是AQS的内部类`ConditionObject`，**每个C
 
 ### 关于线程
 
-线程状态：
+#### 线程状态：
 
 ![在这里插入图片描述](https://img-blog.csdnimg.cn/20190511095933572.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3NzcHVkZGluZw==,size_16,color_FFFFFF,t_70)
 
@@ -156,3 +156,11 @@ public void run() {
     }
 ```
 
+#### 线程关机
+
+`kill -9 pid`相当于一次系统宕机，系统断电；`kill -15 pid`通过该命令发送一个关闭信号给jvm，可以执行一些预定的关机钩子程序。
+
+executorService有shutdown方法和shutdownNow方法
+
+- shutdown：ThreadPoolExecutor在shutdown之后会变成SHUTDOWN状态，无法接受新的任务，随后等待正在执行的任务执行完成。意味着，shutdown只是发出了一个命令，至于有没有关闭还是得看线程自己。
+- shutdownNow：执行后状态变成STOP，并对执行中的线程调用Thread.interrupt方法（但如果线程未处理中断，则不会有任何事发生），所以并不代表“立刻关闭”。
