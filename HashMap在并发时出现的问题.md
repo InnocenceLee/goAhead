@@ -4,7 +4,7 @@ java8中HashMap使用链表法避免哈希冲突（相同hash值），当链表�
 
 ![img](https:////upload-images.jianshu.io/upload_images/7368936-0424df309cb12e86.png?imageMogr2/auto-orient/strip|imageView2/2/w/552/format/webp)
 
-> Hashtable和ConcurrentHashMap两者均不允许key和value为null，否则会报错空指针异常。对于Hashtable主要是设计当时想key都能实现hashCode和equals方法。并且ConcurrentHashmap和Hashtable都是支持并发的，这样会有一个问题，当你通过get(k)获取对应的value时，如果获取到的是null时，你无法判断，它是put（k,v）的时候value为null，还是这个key从来没有做过映射。HashMap是非并发的，可以通过contains(key)来做这个判断。而支持并发的Map在调用m.contains（key）和m.get(key),m可能已经不同了。
+> Hashtable和ConcurrentHashMap两者均不允许key和value为null，否则会报错空指针异常。对于Hashtable主要是设计当时想key都能实现hashCode和equals方法。并且ConcurrentHashmap和Hashtable都是支持并发的，这样会有一个问题，**当你通过get(k)获取对应的value时，如果获取到的是null时，你无法判断，它是put（k,v）的时候value为null，还是这个key从来没有做过映射，此时由于是并发，所以你也无法通过contain判断**。HashMap是非并发的，可以通过contains(key)来做这个判断。而支持并发的Map在调用m.contains（key）和m.get(key),m可能已经不同了。
 >
 
 ## HashMap在并发时出现的问题
@@ -554,7 +554,7 @@ public V put(K key, V value) {
 > 红黑树的平均查找长度是log(n)，长度为8的时候，平均查找长度为3，如果继续使用链表，平均查找长度为8/2=4，这才有转换为树的必要。链表长度如果是小于等于6，6/2=3，虽然速度也很快的，但是转化为树结构和生成树的时间并不会太短。
 >  还有选择6和8，中间有个差值7可以有效防止链表和树频繁转换。假设一下，如果设计成链表个数超过8则链表转换成树结构，链表个数小于8则树结构转换成链表，如果一个HashMap不停的插入、删除元素，链表个数在8左右徘徊，就会频繁的发生树转链表、链表转树，效率会很低。
 
-> **注意，当数组长度小于64（常量定义）的时候，扩张数组长度一倍，否则的话把链表转为树。并不是每次都直接树化的。**
+> **注意，当数组长度小于64（常量定义）的时候，扩张数组长度一倍，否则的话把链表转为树。并不是每次都直接树化的。**MIN_TREEIFY_CAPACITY 最小树形化容量阈值：即 当哈希表中的容量 > 该值时，才允许树形化链表 （即 将链表 转换成红黑树）否则，若桶内元素太多时，则直接扩容，而不是树形化！
 
 此外，在JDK7中，hash计算的时候会对操作数进行右移操作，计算复杂，目的是将高位也参与运算，减少hash碰撞；在JDK8中，链表可以转变成红黑树，所以hash计算也变得简单。下面的图为JDK8中的hash计算和索引计算。
 
