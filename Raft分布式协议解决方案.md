@@ -177,8 +177,6 @@ Leader 出故障挂掉了，其他四个 Follower 将进行重新选主。
 
 ![img](https:////upload-images.jianshu.io/upload_images/2736397-25086b76d62d09b1.png?imageMogr2/auto-orient/strip|imageView2/2/w/650/format/webp)
 
-
-
 两个 Follower 在 Term 3 还没投过票，所以返回 OK，这时 Candidate 一共有三票，被选为了 Leader。
 
 
@@ -279,7 +277,7 @@ Network Partition 将节点分成两边，一边有两个节点，一边三个�
 
 
 
-两个节点这边已经有 Leader 了，来自客户端的数据 “bob” 通过 Leader 同步到 Follower。
+两个节点这边已经有 Leader 了，来自客户端的数据 “bob” 通过 Leader 同步到 Follower，但未提交。
 
 
 
@@ -386,4 +384,4 @@ Raft 是能够实现分布式系统强一致性的算法，每个系统节点有
 5. ZK集群中，成为公认的leader条件更苛刻，raft模式下，只要新leader发一个命令为空的Log出来，大家就会认同这个节点为leader，但是在ZK集群中，追随leader的2种条件都很苛刻
 
 - 要么recvset中半数节点的选举following投票给A，才会认可A为自己的leader
-- 要么outofelection中半数节点都认可A为leader，自己才会认可A为自己的leader
+- 要么autofelection中半数节点都认可A为leader，自己才会认可A为自己的leader

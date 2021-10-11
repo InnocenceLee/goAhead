@@ -4,7 +4,7 @@ java8中HashMap使用链表法避免哈希冲突（相同hash值），当链表�
 
 ![img](https:////upload-images.jianshu.io/upload_images/7368936-0424df309cb12e86.png?imageMogr2/auto-orient/strip|imageView2/2/w/552/format/webp)
 
-> Hashtable和ConcurrentHashMap两者均不允许key和value为null，否则会报错空指针异常。对于Hashtable主要是设计当时想key都能实现hashCode和equals方法。并且ConcurrentHashmap和Hashtable都是支持并发的，这样会有一个问题，**当你通过get(k)获取对应的value时，如果获取到的是null时，你无法判断，它是put（k,v）的时候value为null，还是这个key从来没有做过映射，此时由于是并发，所以你也无法通过contain判断**。HashMap是非并发的，可以通过contains(key)来做这个判断。而支持并发的Map在调用m.contains（key）和m.get(key),m可能已经不同了。
+> Hashtable和ConcurrentHashMap两者均不允许key和value为null，否则会报错空指针异常。对于Hashtable主要是设计当时想**key都能实现hashCode方法用于计算hashCode，而并没有对null进行特殊处理**。并且ConcurrentHashmap和Hashtable都是支持并发的即线程安全的，这样会有一个问题，**当你通过get(k)获取对应的value时，如果获取到的是null时，你无法判断，它是put（k,v）的时候value为null，还是这个key从来没有做过映射，此时由于是并发，所以你也无法通过contain判断**。HashMap是非并发的，可以通过contains(key)来做这个判断。而支持并发的Map在调用m.contains（key）和m.get(key),m可能已经不同了。
 >
 
 ## HashMap在并发时出现的问题
@@ -19,7 +19,9 @@ jdk8中如果没有hash碰撞则会直接插入元素。如果线程A和线程B�
 
 造成死循环的原因是多线程进行put操作时，触发了HashMap的扩容（resize函数），出现链表的两个结点形成闭环，导致死循环。
 
-JDK7的put操作头插法（并发会出现死循环）、jdk8变成尾插法（避免循环链）
+JDK7的put操作头插法（并发会出现死循环）、jdk8变成尾插法（避免循环链）。
+
+JDK7的resize迁移操作也是头插法，jdk8的resize由于会树化，所以也不可能头插法了。
 
 ## jdk7单线程resize过程
 
@@ -48,7 +50,7 @@ while(null != e) {
 
 ```ruby
 while(null != e) {
-    Entry<K,V> next = e.next;
+    Entry<K,V> next = e.next; 
     e.next = newTable[i]; //假设线程一执行完这里就被调度挂起了
     newTable[i] = e;
     e = next;
@@ -62,7 +64,7 @@ while(null != e) {
 3. newTable[i] = e;// 现在新Hash表的头指针仍然指向e没转移前的第一个元素，所以需要将新Hash表的头指针指向e
 4. e = next;// 转移e的下一个结点
 
-### JDK7并发时resize过程
+## JDK7并发时resize过程
 
 1. 假设我们线程一执行完`e.next = newTable[i];`就被调度挂起了
 
@@ -144,7 +146,7 @@ static final int hash(Object key) {
         return (key == null) ? 0 : (h = key.hashCode()) ^ (h >>> 16);
     }//相当简单，就是key的hashcode然后高位右移减少哈希碰撞
 
-//计算桶下标，由于n是2次幂，所以&运算代替%
+//计算桶下标，由于n是2次幂，所以&运算代替% ，等价于hash % n
 i = (n - 1) & hash
 ```
 
@@ -173,7 +175,7 @@ final V putVal(int hash, K key, V value, boolean onlyIfAbsent,
                 e = ((TreeNode<K,V>)p).putTreeVal(this, tab, hash, key, value);
             else {
 			//如果p不为空，且key也不相等，此时节点p不是TreeNode类型（即是Node类型），则将新节点添加到该位置所在链表的最后的一个元素
-			//并且添加完成后，如果此时该位置的链表超过了阈值，则转化为红黑树，需要注意treeifyBin内部判断如果元素个数小于64，则会扩容，而不是树化
+			//并且添加完成后，如果此时该位置的链表超过了阈值，则转化为红黑树，需要注意treeifyBin内部判断如果元素个数小于64，则会扩容，而不是树化!!!
                 for (int binCount = 0; ; ++binCount) {
                     if ((e = p.next) == null) {
                         p.next = newNode(hash, key, value, null);
@@ -312,7 +314,7 @@ final Node<K,V>[] resize() {
 
 final void split(HashMap<K,V> map, Node<K,V>[] tab, int index, int bit) {
             TreeNode<K,V> b = this;
-            // 将红黑树重新拆解为两个链表，lo表示扩容后在原位置，hi表示扩容后位置变化，并且保留节点顺序
+            // 将红黑树重新拆解为两个树，lo表示扩容后在原位置，hi表示扩容后位置变化，并且保留节点顺序
             TreeNode<K,V> loHead = null, loTail = null;
             TreeNode<K,V> hiHead = null, hiTail = null;
             int lc = 0, hc = 0;//lc和hc表示两个链表的长度
@@ -379,7 +381,7 @@ jdk8中传不传容量都会在构造方法中设置负载因子为默认0.75（
 
 创建时候oldCap都为0，在第一次resize时候才设置newCap值为oldThres，并且此时会重新计算threshold值。
 
-而在jdk7中，初始threshold值为传入的cap值，在第一次put时cap会设置为thres最近的2幂次值，然后threshold重新计算，并且Entry数组直接初始化为cap大小！（jdk8的数组不会初始化大小，而是插入一个后判断resize()）。
+**而在jdk7中，初始threshold值为传入的cap值，在第一次put时cap会设置为thres最近的2幂次值，然后threshold重新计算，并且Entry数组直接初始化为cap大小！（jdk8的数组不会初始化大小，而是插入一个后判断resize()）。**
 
 ```java
 //jdk8返回大于输入参数且最近的2的整数次幂的数。
@@ -568,7 +570,7 @@ public V put(K key, V value) {
 
 ### 3.扩容机制的优化
 
-在JDK7中，对所有链表进行rehash计算；在JDK8中，实际上也是通过取余找到元素所在的数组的位置，取余的方式在putVal里面：`i = (n - 1) & hash`。我们假设，在扩容之前，key取余之后留下了n位。扩容之后，容量变为2倍，所以key取余得到的二进制数就有n+1位。在这n+1位里面，如果第1位是0，那么扩容前后这个key的位置还是在相同的位置（因为hash相同，并且余数的第1位是0，和之前n位的时候一样，所以余数还是一样，位置就一样了）；如果这n+1位的第一位是1，那么就和之前的不同，那么这个key就应该放在之前的位置再加上之前整个数组的长度的位置。这样子就减少了移动所有数据带来的消耗。（慢慢读两遍，想明白了，就觉得这个其实不看图更好理解）
+在JDK7中，对所有链表进行rehash计算；在JDK8中，实际上也是通过取余找到元素所在的数组的位置，取余的方式在putVal里面：`i = (n - 1) & hash`。我们假设，**在扩容之前，key取余之后留下了n位。扩容之后，容量变为2倍，所以key取余得到的二进制数就有n+1位。在这n+1位里面，如果第1位是0，那么扩容前后这个key的位置还是在相同的位置**（因为hash相同，并且余数的第1位是0，和之前n位的时候一样，所以余数还是一样，位置就一样了）；如果这n+1位的第一位是1，那么就和之前的不同，那么这个key就应该放在之前的位置再加上之前整个数组的长度的位置。这样子就减少了移动所有数据带来的消耗。（慢慢读两遍，想明白了，就觉得这个其实不看图更好理解）
 
 
 
@@ -594,7 +596,7 @@ JDK8的rehash计算
 
 ### HashMap在JDK7扩容过程中计算新索引的方法
 
-转移操作 = 按旧链表的正序遍历链表、在新链表的头部依次插入，即在转移数据、扩容后，容易出现链表逆序的情况 。
+转移操作 =》 按旧链表的正序遍历链表、在**新链表**的头部依次插入，即在转移数据、扩容后，容易出现链表逆序的情况 。
 
 通过transfer方法将旧数组中的元素复制到新数组，在这个方法中进行了包括释放旧的Entry中的对象引用，该过程中如果需要重新计算hash值就重新计算，然后根据indexfor（）方法计算索引值。而索引值的计算方法为: `h & (length-1)`
  ，即hashcode计算出的hash值和数组长度进行与运算。
@@ -671,7 +673,7 @@ JDK8中ConcurrentHashMap参考了JDK8 HashMap的实现，采用了**数组+链�
 
 #### ConcurrentHashMap总结
 
-其实可以看出JDK1.8版本的ConcurrentHashMap的数据结构已经接近HashMap，相对而言，ConcurrentHashMap只是增加了同步的操作来控制并发，从JDK1.7版本的ReentrantLock+Segment+HashEntry，到JDK1.8版本中synchronized+CAS+HashEntry+红黑树。
+其实可以看出JDK1.8版本的ConcurrentHashMap的数据结构已经接近HashMap，相对而言，**ConcurrentHashMap只是增加了同步的操作来控制并发**，从JDK1.7版本的ReentrantLock+Segment+HashEntry，到JDK1.8版本中**synchronized+CAS+HashEntry+红黑树**。
 
 **1.数据结构**：取消了Segment分段锁的数据结构，取而代之的是数组+链表+红黑树的结构。
 
@@ -682,6 +684,77 @@ JDK8中ConcurrentHashMap参考了JDK8 HashMap的实现，采用了**数组+链�
 **4.链表转化为红黑树**:定位结点的hash算法简化会带来弊端,Hash冲突加剧,因此在链表节点数量大于8时，会将链表转化为红黑树进行存储。
 
 **5.查询时间复杂度**：从原来的遍历链表O(n)，变成遍历红黑树O(logN)。
+
+#### jdk8中ConcurrentHashMap的put方法示例
+
+```java
+final V putVal(K key, V value, boolean onlyIfAbsent) {
+        if (key == null || value == null) throw new NullPointerException();
+        int hash = spread(key.hashCode());
+        int binCount = 0;
+        for (Node<K,V>[] tab = table;;) {
+            Node<K,V> f; int n, i, fh;
+            if (tab == null || (n = tab.length) == 0)
+                tab = initTable();
+            else if ((f = tabAt(tab, i = (n - 1) & hash)) == null) {
+                //先CAS进行put
+                if (casTabAt(tab, i, null,
+                             new Node<K,V>(hash, key, value, null)))
+                    break;                   // no lock when adding to empty bin
+            }
+            else if ((fh = f.hash) == MOVED)
+                tab = helpTransfer(tab, f);
+            else {
+                V oldVal = null;
+                synchronized (f) {//如果有冲突则加锁
+                    if (tabAt(tab, i) == f) {
+                        if (fh >= 0) {
+                            binCount = 1;
+                            for (Node<K,V> e = f;; ++binCount) {
+                                K ek;
+                                if (e.hash == hash &&
+                                    ((ek = e.key) == key ||
+                                     (ek != null && key.equals(ek)))) {
+                                    oldVal = e.val;
+                                    if (!onlyIfAbsent)
+                                        e.val = value;
+                                    break;
+                                }
+                                Node<K,V> pred = e;
+                                if ((e = e.next) == null) {
+                                    pred.next = new Node<K,V>(hash, key,
+                                                              value, null);
+                                    break;
+                                }
+                            }
+                        }
+                        else if (f instanceof TreeBin) {
+                            Node<K,V> p;
+                            binCount = 2;
+                            if ((p = ((TreeBin<K,V>)f).putTreeVal(hash, key,
+                                                           value)) != null) {
+                                oldVal = p.val;
+                                if (!onlyIfAbsent)
+                                    p.val = value;
+                            }
+                        }
+                    }
+                }
+                if (binCount != 0) {
+                    if (binCount >= TREEIFY_THRESHOLD)
+                        treeifyBin(tab, i);
+                    if (oldVal != null)
+                        return oldVal;
+                    break;
+                }
+            }
+        }
+        addCount(1L, binCount);
+        return null;
+    }
+```
+
+
 
 #### ConcurrentHashMap扩容
 
